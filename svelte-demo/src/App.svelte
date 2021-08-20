@@ -4,6 +4,12 @@
 	let test = 'fkf';
 	import Timer from "./timer.svelte";
 	import "../node_modules/bootstrap/dist/css/bootstrap.min.css";
+	import WordsAndInput from "./WordsAndInput.svelte";;
+
+	const pkg = {
+		user_input:'Ha',
+		hint:'Type to Start'
+	};
 </script>
 
 
@@ -12,6 +18,7 @@
 	<p>Visit the <a href="https://svelte.dev/tutorial">Svelte tutorial</a> to learn how to build Svelte apps.</p>
 	<h2>{say}</h2>
 	<Timer></Timer>
+	<WordsAndInput {...pkg}></WordsAndInput>
 </main>
 
 
