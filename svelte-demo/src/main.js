@@ -1,3 +1,5 @@
+import '@popperjs/core/dist/cjs/popper.js'
+import 'bootstrap/dist/js/bootstrap.js';
 import App from './App.svelte';
 
 const app = new App({
