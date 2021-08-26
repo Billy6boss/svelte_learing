@@ -46,7 +46,7 @@ export default {
 		// we'll extract any component CSS out into
 		// a separate file - better for performance
 		css({ output: 'bundle.css' }),
-		css({output:'public/build/boot.css'}),
+		// css({output:'public/build/boot.css'}),
 		
 
 		// If you have external dependencies installed from
