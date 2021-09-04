@@ -1,9 +1,11 @@
 <script>
     import { words } from "./top200words.js";
     import Timer from "./timer.svelte";
+    import { beforeUpdate,afterUpdate } from "svelte";
 
     let words_array = words;
     let user_input_text = "";
+    let user_input;
     let correct = 0;
     let worng = 0;
     let min, mic_sec;
@@ -21,6 +23,8 @@
         timerControl.stopTimer();
         user_input_text = "";
     }
+
+    
 
     export let hint;
 
@@ -62,23 +66,31 @@
     <span class="user_text">{user_input_text}</span>
     <ul id="words_list" class="display-style">
         {#each words_array as thisWord, i}
-            <li value={i}>{thisWord}</li>
+            <li class:correct="{isWordMatch}" value={i}>{thisWord}</li>
         {/each}
     </ul>
 </div>
 <!-- <p>{words_array.join('、')}</p> -->
+
+
 <input
     id="user_input"
     type="text"
     disabled={closeInput}
     placeholder={hint}
+    bind:this={user_input}
     on:keypress={keyPress}
     bind:value={user_input_text}
 />
-
 <button id="reset_btn" on:click={resetWords} class="btn btn-primary">↻</button>
+
 <h5>✔:{correct} ❌:{worng}</h5>
 <Timer bind:this={timerControl} bind:min bind:mic_sec hideButton={true} />
+<div class="input-group mb-3 justify-content-center">
+    <span class="input-group-text">Test Time</span>
+    <input id="overTime" class="" type="number" min="1" bind:value={testOvertime}/>
+    <span class="input-group-text">Min.</span>
+</div>
 
 <style>
     #words_area {
@@ -105,7 +117,7 @@
     .display-style li {
         margin-right: 3%;
     }
-    #words_list li.correct {
+    #words_list li.correct:nth-of-type(1) {
         color: #dcdcaaff;
     }
 </style>
