@@ -1,7 +1,7 @@
 <script>
     import { words } from "./top200words.js";
     import Timer from "./timer.svelte";
-    import { beforeUpdate,afterUpdate } from "svelte";
+    import { result_word } from "./top200words";
 
     let words_array = words;
     let user_input_text = "";
@@ -24,15 +24,19 @@
         user_input_text = "";
     }
 
-    
-
     export let hint;
 
-    function keyPress(e) {
+    function keydown(e) {
         timerControl.startTimer();
 
         if (e.key === " " || e.key === "Spacebar") {
             e.preventDefault();
+            // console.log((user_input_text))
+            result_word.update((x) => {
+                x.push({word:user_input_text,result:isWordMatch,color:Math.floor(Math.random()*3)});
+                return x;
+            });
+            
             if (isWordMatch) {
                 correct++;
             } else {
@@ -66,12 +70,11 @@
     <span class="user_text">{user_input_text}</span>
     <ul id="words_list" class="display-style">
         {#each words_array as thisWord, i}
-            <li class:correct="{isWordMatch}" value={i}>{thisWord}</li>
+            <li class:correct={isWordMatch} value={i}>{thisWord}</li>
         {/each}
     </ul>
 </div>
 <!-- <p>{words_array.join('、')}</p> -->
-
 
 <input
     id="user_input"
@@ -79,7 +82,7 @@
     disabled={closeInput}
     placeholder={hint}
     bind:this={user_input}
-    on:keypress={keyPress}
+    on:keydown={keydown}
     bind:value={user_input_text}
 />
 <button id="reset_btn" on:click={resetWords} class="btn btn-primary">↻</button>
@@ -88,7 +91,13 @@
 <Timer bind:this={timerControl} bind:min bind:mic_sec hideButton={true} />
 <div class="input-group mb-3 justify-content-center">
     <span class="input-group-text">Test Time</span>
-    <input id="overTime" class="" type="number" min="1" bind:value={testOvertime}/>
+    <input
+        id="overTime"
+        class=""
+        type="number"
+        min="1"
+        bind:value={testOvertime}
+    />
     <span class="input-group-text">Min.</span>
 </div>
 

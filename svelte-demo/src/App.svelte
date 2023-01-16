@@ -2,9 +2,9 @@
 	export let name;
 	// let showCount;
 	import "../node_modules/bootstrap/dist/css/bootstrap.min.css";
-	// import "../node_modules/bootstrap/dist/js/bootstrap.min.js";
 	import WordsAndInput from "./WordsAndInput.svelte";
 	import Offcanvas from "./offcanvasMenu.svelte";
+	import TypeResult from "./typeResult.svelte";
 
 	const pkg = {
 		hint:'Type to Start'
@@ -22,6 +22,7 @@
 	<h1 class="mb-5">Hello {name}!</h1>
 	<p>Visit the <a href="https://svelte.dev/tutorial" on:click|preventDefault={callAlert}>Svelte tutorial</a> to learn how to build Svelte apps.</p>
 	<WordsAndInput {...pkg}></WordsAndInput>
+	<TypeResult></TypeResult>
 </main>
 
 

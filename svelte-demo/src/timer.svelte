@@ -1,5 +1,4 @@
 <script>
-import { each } from "svelte/internal";
 
 
     export let mic_sec = 0;
