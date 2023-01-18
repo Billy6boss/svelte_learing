@@ -7031,6 +7031,24 @@ var app = (function () {
 	function is_empty(obj) {
 	    return Object.keys(obj).length === 0;
 	}
+	function validate_store(store, name) {
+	    if (store != null && typeof store.subscribe !== 'function') {
+	        throw new Error(`'${name}' is not a store with a 'subscribe' method`);
+	    }
+	}
+	function subscribe(store, ...callbacks) {
+	    if (store == null) {
+	        return noop;
+	    }
+	    const unsub = store.subscribe(...callbacks);
+	    return unsub.unsubscribe ? () => unsub.unsubscribe() : unsub;
+	}
+	function component_subscribe(component, store, callback) {
+	    component.$$.on_destroy.push(subscribe(store, callback));
+	}
+	function null_to_empty(value) {
+	    return value == null ? '' : value;
+	}
 	function append(target, node) {
 	    target.appendChild(node);
 	}
@@ -7055,6 +7073,9 @@ var app = (function () {
 	function space() {
 	    return text(' ');
 	}
+	function empty() {
+	    return text('');
+	}
 	function listen(node, event, handler, options) {
 	    node.addEventListener(event, handler, options);
 	    return () => node.removeEventListener(event, handler, options);
@@ -7072,6 +7093,9 @@ var app = (function () {
 	    else if (node.getAttribute(attribute) !== value)
 	        node.setAttribute(attribute, value);
 	}
+	function to_number(value) {
+	    return value === '' ? null : +value;
+	}
 	function children(element) {
 	    return Array.from(element.childNodes);
 	}
@@ -7081,10 +7105,46 @@ var app = (function () {
 	function set_style(node, key, value, important) {
 	    node.style.setProperty(key, value, important ? 'important' : '');
 	}
+	function toggle_class(element, name, toggle) {
+	    element.classList[toggle ? 'add' : 'remove'](name);
+	}
 	function custom_event(type, detail, bubbles = false) {
 	    const e = document.createEvent('CustomEvent');
 	    e.initCustomEvent(type, bubbles, false, detail);
 	    return e;
+	}
+	class HtmlTag {
+	    constructor() {
+	        this.e = this.n = null;
+	    }
+	    c(html) {
+	        this.h(html);
+	    }
+	    m(html, target, anchor = null) {
+	        if (!this.e) {
+	            this.e = element(target.nodeName);
+	            this.t = target;
+	            this.c(html);
+	        }
+	        this.i(anchor);
+	    }
+	    h(html) {
+	        this.e.innerHTML = html;
+	        this.n = Array.from(this.e.childNodes);
+	    }
+	    i(anchor) {
+	        for (let i = 0; i < this.n.length; i += 1) {
+	            insert(this.t, this.n[i], anchor);
+	        }
+	    }
+	    p(html) {
+	        this.d();
+	        this.h(html);
+	        this.i(this.a);
+	    }
+	    d() {
+	        this.n.forEach(detach);
+	    }
 	}
 
 	let current_component;
@@ -7218,13 +7278,6 @@ var app = (function () {
 	}
 	function get_spread_object(spread_props) {
 	    return typeof spread_props === 'object' && spread_props !== null ? spread_props : {};
-	}
-	function each(items, fn) {
-	    let str = '';
-	    for (let i = 0; i < items.length; i += 1) {
-	        str += fn(items[i], i);
-	    }
-	    return str;
 	}
 
 	function bind(component, name, callback) {
@@ -7445,13 +7498,63 @@ var app = (function () {
 	    $inject_state() { }
 	}
 
+	const subscriber_queue = [];
+	/**
+	 * Create a `Writable` store that allows both updating and reading by subscription.
+	 * @param {*=}value initial value
+	 * @param {StartStopNotifier=}start start and stop notifications for subscriptions
+	 */
+	function writable(value, start = noop) {
+	    let stop;
+	    const subscribers = new Set();
+	    function set(new_value) {
+	        if (safe_not_equal(value, new_value)) {
+	            value = new_value;
+	            if (stop) { // store is ready
+	                const run_queue = !subscriber_queue.length;
+	                for (const subscriber of subscribers) {
+	                    subscriber[1]();
+	                    subscriber_queue.push(subscriber, value);
+	                }
+	                if (run_queue) {
+	                    for (let i = 0; i < subscriber_queue.length; i += 2) {
+	                        subscriber_queue[i][0](subscriber_queue[i + 1]);
+	                    }
+	                    subscriber_queue.length = 0;
+	                }
+	            }
+	        }
+	    }
+	    function update(fn) {
+	        set(fn(value));
+	    }
+	    function subscribe(run, invalidate = noop) {
+	        const subscriber = [run, invalidate];
+	        subscribers.add(subscriber);
+	        if (subscribers.size === 1) {
+	            stop = start(set) || noop;
+	        }
+	        run(value);
+	        return () => {
+	            subscribers.delete(subscriber);
+	            if (subscribers.size === 0) {
+	                stop();
+	                stop = null;
+	            }
+	        };
+	    }
+	    return { set, update, subscribe };
+	}
+
 	const words = ["time","person","year","way","day","thing","man","world","life","hand","part","child","eye","woman","place","work","week","case","point","government","company","number","group","problem","fact","Verbs","be","have","do","say","get","make","go","know","take","see","come","think","look","want","give","use","find","tell","ask","work","seem","feel","try","leave","call","Adjectives","good","new","first","last","long","great","little","own","other","old","right","big","high","different","small","large","next","early","young","important","few","public","bad","same","able","Prepositions","to","of","in","for","on","with","at","by","from","up","about","into","over","after","Others","the","and","a","that","I","it","not","he","as","you","this","but","his","they","her","she","or","an","will","my","one","all","would","there","their","the","be","to","of","and","a","in","that","have","I","it","for","not","on","with","he","as","you","do","at","this","but","his","by","from","they","we","say","her","she","or","an","will","my","one","all","would","there","their","what","so","up","out","if","about","who","get","which","go","me","when","make","can","like","time","no","just","him","know","take","people","into","year","your","good","some","could","them","see","other","than","then","now","look","only","come","its","over","think","also","back","after","use","two","how","our","work","first","well","way","even","new","want","because","any","these","give","day","most","us"];
+	const result_word = writable([{word:"test",result:true,color:0}]);
 
 	/* src\timer.svelte generated by Svelte v3.42.1 */
-	const file$3 = "src\\timer.svelte";
 
-	// (49:0) {#if !hideButton}
-	function create_if_block(ctx) {
+	const file$4 = "src\\timer.svelte";
+
+	// (48:0) {#if !hideButton}
+	function create_if_block$1(ctx) {
 		let button0;
 		let t1;
 		let button1;
@@ -7471,11 +7574,11 @@ var app = (function () {
 				button2 = element("button");
 				button2.textContent = "Reset";
 				attr_dev(button0, "class", "btn btn-success");
-				add_location(button0, file$3, 49, 4, 944);
+				add_location(button0, file$4, 48, 4, 903);
 				attr_dev(button1, "class", "btn btn-danger");
-				add_location(button1, file$3, 50, 4, 1015);
+				add_location(button1, file$4, 49, 4, 974);
 				attr_dev(button2, "class", "btn btn-secondary");
-				add_location(button2, file$3, 51, 4, 1086);
+				add_location(button2, file$4, 50, 4, 1045);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, button0, anchor);
@@ -7508,16 +7611,16 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block.name,
+			id: create_if_block$1.name,
 			type: "if",
-			source: "(49:0) {#if !hideButton}",
+			source: "(48:0) {#if !hideButton}",
 			ctx
 		});
 
 		return block;
 	}
 
-	function create_fragment$3(ctx) {
+	function create_fragment$4(ctx) {
 		let t0;
 		let h5;
 		let t1;
@@ -7534,7 +7637,7 @@ var app = (function () {
 		let t8;
 		let mounted;
 		let dispose;
-		let if_block = !/*hideButton*/ ctx[2] && create_if_block(ctx);
+		let if_block = !/*hideButton*/ ctx[2] && create_if_block$1(ctx);
 
 		const block = {
 			c: function create() {
@@ -7553,12 +7656,12 @@ var app = (function () {
 				input = element("input");
 				t8 = text("\r\n    Hide the button");
 				attr_dev(span, "class", "sec-box svelte-v51svn");
-				add_location(span, file$3, 54, 38, 1209);
-				add_location(h5, file$3, 53, 0, 1165);
+				add_location(span, file$4, 53, 38, 1168);
+				add_location(h5, file$4, 52, 0, 1124);
 				attr_dev(input, "type", "checkbox");
-				add_location(input, file$3, 59, 4, 1311);
+				add_location(input, file$4, 58, 4, 1270);
 				attr_dev(label, "for", "");
-				add_location(label, file$3, 58, 0, 1291);
+				add_location(label, file$4, 57, 0, 1250);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -7590,7 +7693,7 @@ var app = (function () {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
-						if_block = create_if_block(ctx);
+						if_block = create_if_block$1(ctx);
 						if_block.c();
 						if_block.m(t0.parentNode, t0);
 					}
@@ -7624,7 +7727,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$3.name,
+			id: create_fragment$4.name,
 			type: "component",
 			source: "",
 			ctx
@@ -7633,7 +7736,7 @@ var app = (function () {
 		return block;
 	}
 
-	function instance$3($$self, $$props, $$invalidate) {
+	function instance$4($$self, $$props, $$invalidate) {
 		let blink;
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('Timer', slots, []);
@@ -7691,7 +7794,6 @@ var app = (function () {
 		};
 
 		$$self.$capture_state = () => ({
-			each,
 			mic_sec,
 			min,
 			hour,
@@ -7750,7 +7852,7 @@ var app = (function () {
 		constructor(options) {
 			super(options);
 
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, {
+			init(this, options, instance$4, create_fragment$4, safe_not_equal, {
 				mic_sec: 0,
 				min: 1,
 				count: 8,
@@ -7764,7 +7866,7 @@ var app = (function () {
 				component: this,
 				tagName: "Timer",
 				options,
-				id: create_fragment$3.name
+				id: create_fragment$4.name
 			});
 		}
 
@@ -7826,35 +7928,40 @@ var app = (function () {
 	}
 
 	/* src\WordsAndInput.svelte generated by Svelte v3.42.1 */
-	const file$2 = "src\\WordsAndInput.svelte";
+	const file$3 = "src\\WordsAndInput.svelte";
 
-	function get_each_context(ctx, list, i) {
+	function get_each_context$1(ctx, list, i) {
 		const child_ctx = ctx.slice();
-		child_ctx[18] = list[i];
-		child_ctx[20] = i;
+		child_ctx[21] = list[i];
+		child_ctx[23] = i;
 		return child_ctx;
 	}
 
-	// (64:8) {#each words_array as thisWord, i}
-	function create_each_block(ctx) {
+	// (72:8) {#each words_array as thisWord, i}
+	function create_each_block$1(ctx) {
 		let li;
-		let t_value = /*thisWord*/ ctx[18] + "";
+		let t_value = /*thisWord*/ ctx[21] + "";
 		let t;
 
 		const block = {
 			c: function create() {
 				li = element("li");
 				t = text(t_value);
-				li.value = /*i*/ ctx[20];
-				attr_dev(li, "class", "svelte-6kvjfy");
-				add_location(li, file$2, 64, 12, 1812);
+				li.value = /*i*/ ctx[23];
+				attr_dev(li, "class", "svelte-ffo5p7");
+				toggle_class(li, "correct", /*isWordMatch*/ ctx[11]);
+				add_location(li, file$3, 72, 12, 2130);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, li, anchor);
 				append_dev(li, t);
 			},
 			p: function update(ctx, dirty) {
-				if (dirty & /*words_array*/ 2 && t_value !== (t_value = /*thisWord*/ ctx[18] + "")) set_data_dev(t, t_value);
+				if (dirty & /*words_array*/ 2 && t_value !== (t_value = /*thisWord*/ ctx[21] + "")) set_data_dev(t, t_value);
+
+				if (dirty & /*isWordMatch*/ 2048) {
+					toggle_class(li, "correct", /*isWordMatch*/ ctx[11]);
+				}
 			},
 			d: function destroy(detaching) {
 				if (detaching) detach_dev(li);
@@ -7863,23 +7970,23 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block.name,
+			id: create_each_block$1.name,
 			type: "each",
-			source: "(64:8) {#each words_array as thisWord, i}",
+			source: "(72:8) {#each words_array as thisWord, i}",
 			ctx
 		});
 
 		return block;
 	}
 
-	function create_fragment$2(ctx) {
-		let div;
-		let span;
+	function create_fragment$3(ctx) {
+		let div0;
+		let span0;
 		let t0;
 		let t1;
 		let ul;
 		let t2;
-		let input;
+		let input0;
 		let t3;
 		let button;
 		let t5;
@@ -7892,6 +7999,13 @@ var app = (function () {
 		let timer;
 		let updating_min;
 		let updating_mic_sec;
+		let t11;
+		let div1;
+		let span1;
+		let t13;
+		let input1;
+		let t14;
+		let span2;
 		let current;
 		let mounted;
 		let dispose;
@@ -7900,15 +8014,15 @@ var app = (function () {
 		let each_blocks = [];
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
+			each_blocks[i] = create_each_block$1(get_each_context$1(ctx, each_value, i));
 		}
 
 		function timer_min_binding(value) {
-			/*timer_min_binding*/ ctx[14](value);
+			/*timer_min_binding*/ ctx[18](value);
 		}
 
 		function timer_mic_sec_binding(value) {
-			/*timer_mic_sec_binding*/ ctx[15](value);
+			/*timer_mic_sec_binding*/ ctx[19](value);
 		}
 
 		let timer_props = { hideButton: true };
@@ -7917,19 +8031,19 @@ var app = (function () {
 			timer_props.min = /*min*/ ctx[3];
 		}
 
-		if (/*mic_sec*/ ctx[8] !== void 0) {
-			timer_props.mic_sec = /*mic_sec*/ ctx[8];
+		if (/*mic_sec*/ ctx[10] !== void 0) {
+			timer_props.mic_sec = /*mic_sec*/ ctx[10];
 		}
 
 		timer = new Timer({ props: timer_props, $$inline: true });
-		/*timer_binding*/ ctx[13](timer);
+		/*timer_binding*/ ctx[17](timer);
 		binding_callbacks.push(() => bind(timer, 'min', timer_min_binding));
 		binding_callbacks.push(() => bind(timer, 'mic_sec', timer_mic_sec_binding));
 
 		const block = {
 			c: function create() {
-				div = element("div");
-				span = element("span");
+				div0 = element("div");
+				span0 = element("span");
 				t0 = text(/*user_input_text*/ ctx[2]);
 				t1 = space();
 				ul = element("ul");
@@ -7939,54 +8053,75 @@ var app = (function () {
 				}
 
 				t2 = space();
-				input = element("input");
+				input0 = element("input");
 				t3 = space();
 				button = element("button");
 				button.textContent = "↻";
 				t5 = space();
 				h5 = element("h5");
 				t6 = text("✔:");
-				t7 = text(/*correct*/ ctx[6]);
+				t7 = text(/*correct*/ ctx[8]);
 				t8 = text(" ❌:");
-				t9 = text(/*worng*/ ctx[7]);
+				t9 = text(/*worng*/ ctx[9]);
 				t10 = space();
 				create_component(timer.$$.fragment);
-				attr_dev(span, "class", "user_text svelte-6kvjfy");
-				add_location(span, file$2, 61, 4, 1658);
+				t11 = space();
+				div1 = element("div");
+				span1 = element("span");
+				span1.textContent = "Test Time";
+				t13 = space();
+				input1 = element("input");
+				t14 = space();
+				span2 = element("span");
+				span2.textContent = "Min.";
+				attr_dev(span0, "class", "user_text svelte-ffo5p7");
+				add_location(span0, file$3, 69, 4, 1976);
 				attr_dev(ul, "id", "words_list");
-				attr_dev(ul, "class", "display-style svelte-6kvjfy");
-				add_location(ul, file$2, 62, 4, 1712);
-				attr_dev(div, "id", "words_area");
-				attr_dev(div, "class", "border border-warning border-3 my-5 svelte-6kvjfy");
-				set_style(div, "color", /*code_color_bule*/ ctx[9]);
-				add_location(div, file$2, 56, 0, 1538);
-				attr_dev(input, "id", "user_input");
-				attr_dev(input, "type", "text");
-				input.disabled = /*closeInput*/ ctx[5];
-				attr_dev(input, "placeholder", /*hint*/ ctx[0]);
-				add_location(input, file$2, 69, 0, 1920);
+				attr_dev(ul, "class", "display-style svelte-ffo5p7");
+				add_location(ul, file$3, 70, 4, 2030);
+				attr_dev(div0, "id", "words_area");
+				attr_dev(div0, "class", "border border-warning border-3 my-5 svelte-ffo5p7");
+				set_style(div0, "color", /*code_color_bule*/ ctx[12]);
+				add_location(div0, file$3, 64, 0, 1856);
+				attr_dev(input0, "id", "user_input");
+				attr_dev(input0, "type", "text");
+				input0.disabled = /*closeInput*/ ctx[6];
+				attr_dev(input0, "placeholder", /*hint*/ ctx[0]);
+				add_location(input0, file$3, 78, 0, 2268);
 				attr_dev(button, "id", "reset_btn");
 				attr_dev(button, "class", "btn btn-primary");
-				add_location(button, file$2, 78, 0, 2085);
-				add_location(h5, file$2, 79, 0, 2166);
+				add_location(button, file$3, 87, 0, 2457);
+				add_location(h5, file$3, 89, 0, 2540);
+				attr_dev(span1, "class", "input-group-text");
+				add_location(span1, file$3, 92, 4, 2707);
+				attr_dev(input1, "id", "overTime");
+				attr_dev(input1, "class", "");
+				attr_dev(input1, "type", "number");
+				attr_dev(input1, "min", "1");
+				add_location(input1, file$3, 93, 4, 2760);
+				attr_dev(span2, "class", "input-group-text");
+				add_location(span2, file$3, 100, 4, 2896);
+				attr_dev(div1, "class", "input-group mb-3 justify-content-center");
+				add_location(div1, file$3, 91, 0, 2648);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
 			},
 			m: function mount(target, anchor) {
-				insert_dev(target, div, anchor);
-				append_dev(div, span);
-				append_dev(span, t0);
-				append_dev(div, t1);
-				append_dev(div, ul);
+				insert_dev(target, div0, anchor);
+				append_dev(div0, span0);
+				append_dev(span0, t0);
+				append_dev(div0, t1);
+				append_dev(div0, ul);
 
 				for (let i = 0; i < each_blocks.length; i += 1) {
 					each_blocks[i].m(ul, null);
 				}
 
 				insert_dev(target, t2, anchor);
-				insert_dev(target, input, anchor);
-				set_input_value(input, /*user_input_text*/ ctx[2]);
+				insert_dev(target, input0, anchor);
+				/*input0_binding*/ ctx[15](input0);
+				set_input_value(input0, /*user_input_text*/ ctx[2]);
 				insert_dev(target, t3, anchor);
 				insert_dev(target, button, anchor);
 				insert_dev(target, t5, anchor);
@@ -7997,13 +8132,22 @@ var app = (function () {
 				append_dev(h5, t9);
 				insert_dev(target, t10, anchor);
 				mount_component(timer, target, anchor);
+				insert_dev(target, t11, anchor);
+				insert_dev(target, div1, anchor);
+				append_dev(div1, span1);
+				append_dev(div1, t13);
+				append_dev(div1, input1);
+				set_input_value(input1, /*testOvertime*/ ctx[4]);
+				append_dev(div1, t14);
+				append_dev(div1, span2);
 				current = true;
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "keypress", /*keyPress*/ ctx[10], false, false, false),
-						listen_dev(input, "input", /*input_input_handler*/ ctx[12]),
-						listen_dev(button, "click", /*resetWords*/ ctx[11], false, false, false)
+						listen_dev(input0, "keydown", /*keydown*/ ctx[13], false, false, false),
+						listen_dev(input0, "input", /*input0_input_handler*/ ctx[16]),
+						listen_dev(button, "click", /*resetWords*/ ctx[14], false, false, false),
+						listen_dev(input1, "input", /*input1_input_handler*/ ctx[20])
 					];
 
 					mounted = true;
@@ -8012,18 +8156,18 @@ var app = (function () {
 			p: function update(ctx, [dirty]) {
 				if (!current || dirty & /*user_input_text*/ 4) set_data_dev(t0, /*user_input_text*/ ctx[2]);
 
-				if (dirty & /*words_array*/ 2) {
+				if (dirty & /*isWordMatch, words_array*/ 2050) {
 					each_value = /*words_array*/ ctx[1];
 					validate_each_argument(each_value);
 					let i;
 
 					for (i = 0; i < each_value.length; i += 1) {
-						const child_ctx = get_each_context(ctx, each_value, i);
+						const child_ctx = get_each_context$1(ctx, each_value, i);
 
 						if (each_blocks[i]) {
 							each_blocks[i].p(child_ctx, dirty);
 						} else {
-							each_blocks[i] = create_each_block(child_ctx);
+							each_blocks[i] = create_each_block$1(child_ctx);
 							each_blocks[i].c();
 							each_blocks[i].m(ul, null);
 						}
@@ -8036,20 +8180,20 @@ var app = (function () {
 					each_blocks.length = each_value.length;
 				}
 
-				if (!current || dirty & /*closeInput*/ 32) {
-					prop_dev(input, "disabled", /*closeInput*/ ctx[5]);
+				if (!current || dirty & /*closeInput*/ 64) {
+					prop_dev(input0, "disabled", /*closeInput*/ ctx[6]);
 				}
 
 				if (!current || dirty & /*hint*/ 1) {
-					attr_dev(input, "placeholder", /*hint*/ ctx[0]);
+					attr_dev(input0, "placeholder", /*hint*/ ctx[0]);
 				}
 
-				if (dirty & /*user_input_text*/ 4 && input.value !== /*user_input_text*/ ctx[2]) {
-					set_input_value(input, /*user_input_text*/ ctx[2]);
+				if (dirty & /*user_input_text*/ 4 && input0.value !== /*user_input_text*/ ctx[2]) {
+					set_input_value(input0, /*user_input_text*/ ctx[2]);
 				}
 
-				if (!current || dirty & /*correct*/ 64) set_data_dev(t7, /*correct*/ ctx[6]);
-				if (!current || dirty & /*worng*/ 128) set_data_dev(t9, /*worng*/ ctx[7]);
+				if (!current || dirty & /*correct*/ 256) set_data_dev(t7, /*correct*/ ctx[8]);
+				if (!current || dirty & /*worng*/ 512) set_data_dev(t9, /*worng*/ ctx[9]);
 				const timer_changes = {};
 
 				if (!updating_min && dirty & /*min*/ 8) {
@@ -8058,13 +8202,17 @@ var app = (function () {
 					add_flush_callback(() => updating_min = false);
 				}
 
-				if (!updating_mic_sec && dirty & /*mic_sec*/ 256) {
+				if (!updating_mic_sec && dirty & /*mic_sec*/ 1024) {
 					updating_mic_sec = true;
-					timer_changes.mic_sec = /*mic_sec*/ ctx[8];
+					timer_changes.mic_sec = /*mic_sec*/ ctx[10];
 					add_flush_callback(() => updating_mic_sec = false);
 				}
 
 				timer.$set(timer_changes);
+
+				if (dirty & /*testOvertime*/ 16 && to_number(input1.value) !== /*testOvertime*/ ctx[4]) {
+					set_input_value(input1, /*testOvertime*/ ctx[4]);
+				}
 			},
 			i: function intro(local) {
 				if (current) return;
@@ -8076,17 +8224,20 @@ var app = (function () {
 				current = false;
 			},
 			d: function destroy(detaching) {
-				if (detaching) detach_dev(div);
+				if (detaching) detach_dev(div0);
 				destroy_each(each_blocks, detaching);
 				if (detaching) detach_dev(t2);
-				if (detaching) detach_dev(input);
+				if (detaching) detach_dev(input0);
+				/*input0_binding*/ ctx[15](null);
 				if (detaching) detach_dev(t3);
 				if (detaching) detach_dev(button);
 				if (detaching) detach_dev(t5);
 				if (detaching) detach_dev(h5);
 				if (detaching) detach_dev(t10);
-				/*timer_binding*/ ctx[13](null);
+				/*timer_binding*/ ctx[17](null);
 				destroy_component(timer, detaching);
+				if (detaching) detach_dev(t11);
+				if (detaching) detach_dev(div1);
 				mounted = false;
 				run_all(dispose);
 			}
@@ -8094,7 +8245,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$2.name,
+			id: create_fragment$3.name,
 			type: "component",
 			source: "",
 			ctx
@@ -8110,12 +8261,13 @@ var app = (function () {
 		}
 	}
 
-	function instance$2($$self, $$props, $$invalidate) {
+	function instance$3($$self, $$props, $$invalidate) {
 		let isWordMatch;
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('WordsAndInput', slots, []);
 		let words_array = words;
 		let user_input_text = "";
+		let user_input;
 		let correct = 0;
 		let worng = 0;
 		let min, mic_sec;
@@ -8125,16 +8277,27 @@ var app = (function () {
 		let closeInput = false;
 		let { hint } = $$props;
 
-		function keyPress(e) {
+		function keydown(e) {
 			timerControl.startTimer();
 
 			if (e.key === " " || e.key === "Spacebar") {
 				e.preventDefault();
 
+				// console.log((user_input_text))
+				result_word.update(x => {
+					x.push({
+						word: user_input_text,
+						result: isWordMatch,
+						color: Math.floor(Math.random() * 3)
+					});
+
+					return x;
+				});
+
 				if (isWordMatch) {
-					$$invalidate(6, correct++, correct);
+					$$invalidate(8, correct++, correct);
 				} else {
-					$$invalidate(7, worng++, worng);
+					$$invalidate(9, worng++, worng);
 				}
 
 				$$invalidate(1, words_array = words_array.slice(1));
@@ -8154,15 +8317,22 @@ var app = (function () {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<WordsAndInput> was created with unknown prop '${key}'`);
 		});
 
-		function input_input_handler() {
+		function input0_binding($$value) {
+			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
+				user_input = $$value;
+				$$invalidate(7, user_input);
+			});
+		}
+
+		function input0_input_handler() {
 			user_input_text = this.value;
-			(((($$invalidate(2, user_input_text), $$invalidate(5, closeInput)), $$invalidate(4, timerControl)), $$invalidate(3, min)), $$invalidate(17, testOvertime));
+			(((($$invalidate(2, user_input_text), $$invalidate(6, closeInput)), $$invalidate(5, timerControl)), $$invalidate(3, min)), $$invalidate(4, testOvertime));
 		}
 
 		function timer_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				timerControl = $$value;
-				$$invalidate(4, timerControl);
+				$$invalidate(5, timerControl);
 			});
 		}
 
@@ -8173,7 +8343,12 @@ var app = (function () {
 
 		function timer_mic_sec_binding(value) {
 			mic_sec = value;
-			$$invalidate(8, mic_sec);
+			$$invalidate(10, mic_sec);
+		}
+
+		function input1_input_handler() {
+			testOvertime = to_number(this.value);
+			$$invalidate(4, testOvertime);
 		}
 
 		$$self.$$set = $$props => {
@@ -8183,8 +8358,10 @@ var app = (function () {
 		$$self.$capture_state = () => ({
 			words,
 			Timer,
+			result_word,
 			words_array,
 			user_input_text,
+			user_input,
 			correct,
 			worng,
 			min,
@@ -8194,7 +8371,7 @@ var app = (function () {
 			code_color_bule,
 			closeInput,
 			hint,
-			keyPress,
+			keydown,
 			resetWords,
 			shuffle,
 			isWordMatch
@@ -8203,16 +8380,17 @@ var app = (function () {
 		$$self.$inject_state = $$props => {
 			if ('words_array' in $$props) $$invalidate(1, words_array = $$props.words_array);
 			if ('user_input_text' in $$props) $$invalidate(2, user_input_text = $$props.user_input_text);
-			if ('correct' in $$props) $$invalidate(6, correct = $$props.correct);
-			if ('worng' in $$props) $$invalidate(7, worng = $$props.worng);
+			if ('user_input' in $$props) $$invalidate(7, user_input = $$props.user_input);
+			if ('correct' in $$props) $$invalidate(8, correct = $$props.correct);
+			if ('worng' in $$props) $$invalidate(9, worng = $$props.worng);
 			if ('min' in $$props) $$invalidate(3, min = $$props.min);
-			if ('mic_sec' in $$props) $$invalidate(8, mic_sec = $$props.mic_sec);
-			if ('testOvertime' in $$props) $$invalidate(17, testOvertime = $$props.testOvertime);
-			if ('timerControl' in $$props) $$invalidate(4, timerControl = $$props.timerControl);
-			if ('code_color_bule' in $$props) $$invalidate(9, code_color_bule = $$props.code_color_bule);
-			if ('closeInput' in $$props) $$invalidate(5, closeInput = $$props.closeInput);
+			if ('mic_sec' in $$props) $$invalidate(10, mic_sec = $$props.mic_sec);
+			if ('testOvertime' in $$props) $$invalidate(4, testOvertime = $$props.testOvertime);
+			if ('timerControl' in $$props) $$invalidate(5, timerControl = $$props.timerControl);
+			if ('code_color_bule' in $$props) $$invalidate(12, code_color_bule = $$props.code_color_bule);
+			if ('closeInput' in $$props) $$invalidate(6, closeInput = $$props.closeInput);
 			if ('hint' in $$props) $$invalidate(0, hint = $$props.hint);
-			if ('isWordMatch' in $$props) isWordMatch = $$props.isWordMatch;
+			if ('isWordMatch' in $$props) $$invalidate(11, isWordMatch = $$props.isWordMatch);
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -8220,11 +8398,11 @@ var app = (function () {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*min*/ 8) {
-				$$invalidate(5, closeInput = min >= testOvertime);
+			if ($$self.$$.dirty & /*min, testOvertime*/ 24) {
+				$$invalidate(6, closeInput = min >= testOvertime);
 			}
 
-			if ($$self.$$.dirty & /*closeInput, timerControl*/ 48) {
+			if ($$self.$$.dirty & /*closeInput, timerControl*/ 96) {
 				if (closeInput) {
 					timerControl.stopTimer();
 					$$invalidate(2, user_input_text = "");
@@ -8235,7 +8413,7 @@ var app = (function () {
 				// let code_color_yellow = "#DCDCAAFF";
 				// let code_color_white = "#FFFFFFFF";
 				// let code_text_color = [code_color_bule,code_color_white,code_color_yellow];
-				isWordMatch = user_input_text === words_array[0];
+				$$invalidate(11, isWordMatch = user_input_text === words_array[0]);
 			}
 		};
 
@@ -8244,31 +8422,36 @@ var app = (function () {
 			words_array,
 			user_input_text,
 			min,
+			testOvertime,
 			timerControl,
 			closeInput,
+			user_input,
 			correct,
 			worng,
 			mic_sec,
+			isWordMatch,
 			code_color_bule,
-			keyPress,
+			keydown,
 			resetWords,
-			input_input_handler,
+			input0_binding,
+			input0_input_handler,
 			timer_binding,
 			timer_min_binding,
-			timer_mic_sec_binding
+			timer_mic_sec_binding,
+			input1_input_handler
 		];
 	}
 
 	class WordsAndInput extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$2, create_fragment$2, safe_not_equal, { hint: 0 });
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { hint: 0 });
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "WordsAndInput",
 				options,
-				id: create_fragment$2.name
+				id: create_fragment$3.name
 			});
 
 			const { ctx } = this.$$;
@@ -8290,9 +8473,9 @@ var app = (function () {
 
 	/* src\offcanvasMenu.svelte generated by Svelte v3.42.1 */
 
-	const file$1 = "src\\offcanvasMenu.svelte";
+	const file$2 = "src\\offcanvasMenu.svelte";
 
-	function create_fragment$1(ctx) {
+	function create_fragment$2(ctx) {
 		let button0;
 		let t1;
 		let div2;
@@ -8308,6 +8491,9 @@ var app = (function () {
 		let t6;
 		let li1;
 		let a1;
+		let t8;
+		let li2;
+		let a2;
 
 		const block = {
 			c: function create() {
@@ -8330,33 +8516,40 @@ var app = (function () {
 				li1 = element("li");
 				a1 = element("a");
 				a1.textContent = "TRW Data geting";
+				t8 = space();
+				li2 = element("li");
+				a2 = element("a");
+				a2.textContent = "Holiday";
 				attr_dev(button0, "class", "btn btn-primary float-start");
 				attr_dev(button0, "type", "button");
 				attr_dev(button0, "data-bs-toggle", "offcanvas");
 				attr_dev(button0, "data-bs-target", "#leftSideMenu");
 				attr_dev(button0, "aria-controls", "leftSideMenu");
-				add_location(button0, file$1, 3, 0, 6);
+				add_location(button0, file$2, 7, 0, 35);
 				attr_dev(h5, "class", "offcanvas-title");
-				add_location(h5, file$1, 6, 8, 313);
+				add_location(h5, file$2, 10, 8, 342);
 				attr_dev(button1, "class", "btn-close text-reset");
 				attr_dev(button1, "data-bs-dismiss", "offcanvas");
-				add_location(button1, file$1, 7, 8, 368);
+				add_location(button1, file$2, 11, 8, 397);
 				attr_dev(div0, "class", "offcanvas-header");
-				add_location(div0, file$1, 5, 4, 273);
+				add_location(div0, file$2, 9, 4, 302);
 				attr_dev(a0, "href", "www.google.com");
-				add_location(a0, file$1, 11, 16, 520);
-				add_location(li0, file$1, 11, 12, 516);
+				add_location(a0, file$2, 15, 16, 549);
+				add_location(li0, file$2, 15, 12, 545);
 				attr_dev(a1, "href", "www.yahoo.com");
-				add_location(a1, file$1, 12, 16, 583);
-				add_location(li1, file$1, 12, 12, 579);
-				add_location(ul, file$1, 10, 8, 498);
+				add_location(a1, file$2, 16, 16, 612);
+				add_location(li1, file$2, 16, 12, 608);
+				attr_dev(a2, "href", "https://data.ntpc.gov.tw/api/datasets/308DCD75-6434-45BC-A95F-584DA4FED251/json?page=1&size=10000");
+				add_location(a2, file$2, 17, 16, 678);
+				add_location(li2, file$2, 17, 12, 674);
+				add_location(ul, file$2, 14, 8, 527);
 				attr_dev(div1, "class", "offcanvas-body");
-				add_location(div1, file$1, 9, 4, 460);
+				add_location(div1, file$2, 13, 4, 489);
 				attr_dev(div2, "class", "offcanvas offcanvas-start");
 				attr_dev(div2, "tabindex", "-1");
 				attr_dev(div2, "id", "leftSideMenu");
 				attr_dev(div2, "aria-labelledby", "offcanvasLabel");
-				add_location(div2, file$1, 4, 0, 163);
+				add_location(div2, file$2, 8, 0, 192);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -8377,6 +8570,9 @@ var app = (function () {
 				append_dev(ul, t6);
 				append_dev(ul, li1);
 				append_dev(li1, a1);
+				append_dev(ul, t8);
+				append_dev(ul, li2);
+				append_dev(li2, a2);
 			},
 			p: noop,
 			i: noop,
@@ -8390,7 +8586,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$1.name,
+			id: create_fragment$2.name,
 			type: "component",
 			source: "",
 			ctx
@@ -8399,7 +8595,7 @@ var app = (function () {
 		return block;
 	}
 
-	function instance$1($$self, $$props) {
+	function instance$2($$self, $$props) {
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('OffcanvasMenu', slots, []);
 		const writable_props = [];
@@ -8414,11 +8610,299 @@ var app = (function () {
 	class OffcanvasMenu extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$1, create_fragment$1, safe_not_equal, {});
+			init(this, options, instance$2, create_fragment$2, safe_not_equal, {});
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "OffcanvasMenu",
+				options,
+				id: create_fragment$2.name
+			});
+		}
+	}
+
+	/* src\typeResult.svelte generated by Svelte v3.42.1 */
+	const file$1 = "src\\typeResult.svelte";
+
+	function get_each_context(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[5] = list[i];
+		child_ctx[7] = i;
+		return child_ctx;
+	}
+
+	// (23:12) {:else}
+	function create_else_block(ctx) {
+		let span;
+		let t0_value = /*thisWord*/ ctx[5].word + "";
+		let t0;
+		let t1_value = /*action_between*/ ctx[1][0] + "";
+		let t1;
+		let t2;
+
+		const block = {
+			c: function create() {
+				span = element("span");
+				t0 = text(t0_value);
+				t1 = text(t1_value);
+				t2 = space();
+				attr_dev(span, "class", "red svelte-1gcp6sk");
+				add_location(span, file$1, 23, 16, 639);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, span, anchor);
+				append_dev(span, t0);
+				append_dev(span, t1);
+				append_dev(span, t2);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*$result_word*/ 1 && t0_value !== (t0_value = /*thisWord*/ ctx[5].word + "")) set_data_dev(t0, t0_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(span);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block.name,
+			type: "else",
+			source: "(23:12) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (19:12) {#if thisWord.result}
+	function create_if_block(ctx) {
+		let span;
+		let t0_value = /*thisWord*/ ctx[5].word + "";
+		let t0;
+		let html_tag;
+		let raw_value = /*action_between*/ ctx[1][0] + "";
+		let t1;
+		let span_class_value;
+
+		const block = {
+			c: function create() {
+				span = element("span");
+				t0 = text(t0_value);
+				html_tag = new HtmlTag();
+				t1 = space();
+				html_tag.a = t1;
+				attr_dev(span, "class", span_class_value = "" + (null_to_empty(/*word_color_list*/ ctx[2][/*thisWord*/ ctx[5].color]) + " svelte-1gcp6sk"));
+				add_location(span, file$1, 19, 16, 465);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, span, anchor);
+				append_dev(span, t0);
+				html_tag.m(raw_value, span);
+				append_dev(span, t1);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*$result_word*/ 1 && t0_value !== (t0_value = /*thisWord*/ ctx[5].word + "")) set_data_dev(t0, t0_value);
+
+				if (dirty & /*$result_word*/ 1 && span_class_value !== (span_class_value = "" + (null_to_empty(/*word_color_list*/ ctx[2][/*thisWord*/ ctx[5].color]) + " svelte-1gcp6sk"))) {
+					attr_dev(span, "class", span_class_value);
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(span);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block.name,
+			type: "if",
+			source: "(19:12) {#if thisWord.result}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (18:8) {#each $result_word as thisWord ,i}
+	function create_each_block(ctx) {
+		let if_block_anchor;
+
+		function select_block_type(ctx, dirty) {
+			if (/*thisWord*/ ctx[5].result) return create_if_block;
+			return create_else_block;
+		}
+
+		let current_block_type = select_block_type(ctx);
+		let if_block = current_block_type(ctx);
+
+		const block = {
+			c: function create() {
+				if_block.c();
+				if_block_anchor = empty();
+			},
+			m: function mount(target, anchor) {
+				if_block.m(target, anchor);
+				insert_dev(target, if_block_anchor, anchor);
+			},
+			p: function update(ctx, dirty) {
+				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block) {
+					if_block.p(ctx, dirty);
+				} else {
+					if_block.d(1);
+					if_block = current_block_type(ctx);
+
+					if (if_block) {
+						if_block.c();
+						if_block.m(if_block_anchor.parentNode, if_block_anchor);
+					}
+				}
+			},
+			d: function destroy(detaching) {
+				if_block.d(detaching);
+				if (detaching) detach_dev(if_block_anchor);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block.name,
+			type: "each",
+			source: "(18:8) {#each $result_word as thisWord ,i}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$1(ctx) {
+		let section;
+		let div;
+		let each_value = /*$result_word*/ ctx[0];
+		validate_each_argument(each_value);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
+		}
+
+		const block = {
+			c: function create() {
+				section = element("section");
+				div = element("div");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				attr_dev(div, "class", "container sublime-style svelte-1gcp6sk");
+				add_location(div, file$1, 15, 4, 320);
+				add_location(section, file$1, 14, 0, 305);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, section, anchor);
+				append_dev(section, div);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].m(div, null);
+				}
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*word_color_list, $result_word, action_between*/ 7) {
+					each_value = /*$result_word*/ ctx[0];
+					validate_each_argument(each_value);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+						} else {
+							each_blocks[i] = create_each_block(child_ctx);
+							each_blocks[i].c();
+							each_blocks[i].m(div, null);
+						}
+					}
+
+					for (; i < each_blocks.length; i += 1) {
+						each_blocks[i].d(1);
+					}
+
+					each_blocks.length = each_value.length;
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) detach_dev(section);
+				destroy_each(each_blocks, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$1.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function instance$1($$self, $$props, $$invalidate) {
+		let $result_word;
+		validate_store(result_word, 'result_word');
+		component_subscribe($$self, result_word, $$value => $$invalidate(0, $result_word = $$value));
+		let { $$slots: slots = {}, $$scope } = $$props;
+		validate_slots('TypeResult', slots, []);
+		let action_between = [" ", ";<br>"];
+		let word_color_list = ["", "blue", "yellow", "light_yellow"];
+		let number1_0;
+
+		function getRandomNumber() {
+			number1_0 = Math.floor(Math.random());
+		}
+
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<TypeResult> was created with unknown prop '${key}'`);
+		});
+
+		$$self.$capture_state = () => ({
+			result_word,
+			action_between,
+			word_color_list,
+			number1_0,
+			getRandomNumber,
+			$result_word
+		});
+
+		$$self.$inject_state = $$props => {
+			if ('action_between' in $$props) $$invalidate(1, action_between = $$props.action_between);
+			if ('word_color_list' in $$props) $$invalidate(2, word_color_list = $$props.word_color_list);
+			if ('number1_0' in $$props) number1_0 = $$props.number1_0;
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		return [$result_word, action_between, word_color_list];
+	}
+
+	class TypeResult extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$1, create_fragment$1, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "TypeResult",
 				options,
 				id: create_fragment$1.name
 			});
@@ -8443,6 +8927,8 @@ var app = (function () {
 		let t7;
 		let t8;
 		let wordsandinput;
+		let t9;
+		let typeresult;
 		let current;
 		let mounted;
 		let dispose;
@@ -8458,6 +8944,8 @@ var app = (function () {
 				props: wordsandinput_props,
 				$$inline: true
 			});
+
+		typeresult = new TypeResult({ $$inline: true });
 
 		const block = {
 			c: function create() {
@@ -8476,11 +8964,13 @@ var app = (function () {
 				t7 = text(" to learn how to build Svelte apps.");
 				t8 = space();
 				create_component(wordsandinput.$$.fragment);
+				t9 = space();
+				create_component(typeresult.$$.fragment);
 				attr_dev(h1, "class", "mb-5 svelte-s81nzd");
-				add_location(h1, file, 21, 1, 413);
+				add_location(h1, file, 21, 1, 416);
 				attr_dev(a, "href", "https://svelte.dev/tutorial");
-				add_location(a, file, 22, 14, 463);
-				add_location(p, file, 22, 1, 450);
+				add_location(a, file, 22, 14, 467);
+				add_location(p, file, 22, 1, 454);
 				attr_dev(main, "class", "svelte-s81nzd");
 				add_location(main, file, 18, 0, 378);
 			},
@@ -8502,6 +8992,8 @@ var app = (function () {
 				append_dev(p, t7);
 				append_dev(main, t8);
 				mount_component(wordsandinput, main, null);
+				append_dev(main, t9);
+				mount_component(typeresult, main, null);
 				current = true;
 
 				if (!mounted) {
@@ -8522,17 +9014,20 @@ var app = (function () {
 				if (current) return;
 				transition_in(offcanvas.$$.fragment, local);
 				transition_in(wordsandinput.$$.fragment, local);
+				transition_in(typeresult.$$.fragment, local);
 				current = true;
 			},
 			o: function outro(local) {
 				transition_out(offcanvas.$$.fragment, local);
 				transition_out(wordsandinput.$$.fragment, local);
+				transition_out(typeresult.$$.fragment, local);
 				current = false;
 			},
 			d: function destroy(detaching) {
 				if (detaching) detach_dev(main);
 				destroy_component(offcanvas);
 				destroy_component(wordsandinput);
+				destroy_component(typeresult);
 				mounted = false;
 				dispose();
 			}
@@ -8572,6 +9067,7 @@ var app = (function () {
 			name,
 			WordsAndInput,
 			Offcanvas: OffcanvasMenu,
+			TypeResult,
 			pkg,
 			callAlert
 		});
